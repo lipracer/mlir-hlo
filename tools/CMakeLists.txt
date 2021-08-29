@@ -14,3 +14,4 @@
 # limitations under the License.
 #
 add_subdirectory(mlir-hlo-opt)
+add_subdirectory(mlir-hlo-run)
