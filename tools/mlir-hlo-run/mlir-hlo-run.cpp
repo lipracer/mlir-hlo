@@ -90,6 +90,7 @@ int main(int argc, char **argv) {
   mlir_ctx.disableMultithreading();
   pm.enableIRPrinting();
 
+  pm.addNestedPass<mlir::FuncOp>(mlir::mhlo::createMhloFusionPass());
   pm.addNestedPass<mlir::FuncOp>(mlir::mhlo::createLegalizeToMemrefPass());
   pm.addNestedPass<mlir::FuncOp>(mlir::createTensorBufferizePass());
   pm.addNestedPass<mlir::FuncOp>(mlir::createStdBufferizePass());

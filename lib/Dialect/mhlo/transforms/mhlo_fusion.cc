@@ -17,6 +17,7 @@ limitations under the License.
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <iostream>
 
 #include "llvm/ADT/EquivalenceClasses.h"
 #include "llvm/Support/Debug.h"
@@ -545,6 +546,37 @@ struct MhloFusionPass : public MhloFusionPassBase<MhloFusionPass> {
       for (Value v : outputs) {
         output_types.push_back(v.getType());
       }
+
+      DenseSet<Operation*> fused_set(pattern.begin(), pattern.end());
+      DenseSet<Operation*> consumers_set;
+      SmallVector<Operation*, 4> consumers_vec;
+      auto first_iter = pattern.front()->getIterator();
+      auto last_iter = pattern.back()->getIterator();
+      while (first_iter != last_iter) {
+        // isn't fused op && consumer's op
+        // move this after fusion op
+        Operation* cur_op = &*first_iter;
+        if (fused_set.end() == fused_set.find(cur_op)) {
+          bool is_consumer = std::any_of(
+              cur_op->operand_begin(), cur_op->operand_end(),
+              [&fused_set, &consumers_set](Value v) {
+                auto op = v.getDefiningOp();
+                return fused_set.find(op) != fused_set.end() ||
+                       consumers_set.find(op) != consumers_set.end();
+              });
+          if (is_consumer) {
+            consumers_set.insert(cur_op);
+            consumers_vec.push_back(cur_op);
+          }
+        }
+        ++first_iter;
+      }
+      std::cout << "before move:" << std::endl;
+      for (auto op : consumers_vec) {
+        op->dump();
+        op->moveAfter(pattern.back());
+      }
+      std::cout << "--------------\n";
 
       FusionOp fusion =
           b.create<mhlo::FusionOp>(fused_loc, output_types, inputs);
