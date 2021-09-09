@@ -258,8 +258,6 @@ struct HloToLhloReduceOpConverter : public BaseOpConversion<mhlo::ReduceOp> {
       mhlo::ReduceOp op, ArrayRef<Value> operands,
       ConversionPatternRewriter& rewriter) const final {
     auto loc = op.getLoc();
-    // TODO(b/137624192) Implement variadic reduce.
-    if (op.getNumResults() != 1) return failure();
     if (!llvm::hasSingleElement(op.body())) {
       return op.emitOpError()
              << "tensor to buffer conversion expects a single block "
@@ -276,7 +274,7 @@ struct HloToLhloReduceOpConverter : public BaseOpConversion<mhlo::ReduceOp> {
     // Convert the region signature to memref and add extra result.
     auto& entry_block = new_op.body().front();
     TypeConverter::SignatureConversion sig_conversion(
-        entry_block.getNumArguments() + 1);
+        entry_block.getNumArguments() / 2 * 3);
     for (auto arg : entry_block.getArguments()) {
       auto old_type = arg.getType().cast<TensorType>();
       auto new_type =
@@ -284,9 +282,27 @@ struct HloToLhloReduceOpConverter : public BaseOpConversion<mhlo::ReduceOp> {
       sig_conversion.addInputs(arg.getArgNumber(), new_type);
     }
     auto return_op = cast<mhlo::ReturnOp>(entry_block.getTerminator());
-    auto result_type = return_op.results().front().getType().cast<TensorType>();
-    sig_conversion.addInputs({MemRefType::get(result_type.getShape(),
-                                              result_type.getElementType())});
+    mlir::Type result_type;
+    if (auto tuple_ty =
+            return_op.results().front().getType().dyn_cast<TupleType>()) {
+      auto tuple_op = return_op.getODSOperands(0).front().getDefiningOp();
+      return_op.getOperation()->dropAllReferences();
+      rewriter.eraseOp(tuple_op);
+      return_op.getOperation()->setOperands(tuple_op->getOperands());
+      SmallVector<Type, 2> mem_tuple_tys(tuple_ty.size());
+      std::transform(tuple_ty.begin(), tuple_ty.end(), mem_tuple_tys.begin(),
+                     [](auto type) {
+                       auto tensor_ty = type.cast<TensorType>();
+                       return MemRefType::get(tensor_ty.getShape(),
+                                              tensor_ty.getElementType());
+                     });
+      sig_conversion.addInputs(mem_tuple_tys);
+    } else {
+      auto result_type =
+          return_op.results().front().getType().cast<TensorType>();
+      sig_conversion.addInputs({MemRefType::get(result_type.getShape(),
+                                                result_type.getElementType())});
+    }
     rewriter.applySignatureConversion(&new_op.body(), sig_conversion);
 
     rewriter.replaceOp(op, ArrayRef<Value>(buffer_args).slice(operands.size()));

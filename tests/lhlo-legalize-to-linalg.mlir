@@ -1242,3 +1242,53 @@ func @reduce_maximum(%arg: memref<100x10xf32>,
 // CHECK-NEXT: memref.load
 // CHECK-NEXT: linalg.yield
 // CHECK-NEXT: }
+
+// -----
+
+// CHECK-DAG: #[[REDUCE_INPUT_MAP:.*]] = affine_map<(d0, d1) -> (d0, d1)>
+// CHECK-DAG: #[[REDUCE_OUTPUT_MAP:.*]] = affine_map<(d0, d1) -> (d0)>
+// CHECK-LABEL: func @reduce_multiple_operand
+module  {
+  func @reduce_multiple_operand(%arg0: memref<1x8xf32>, %arg1: memref<1x8xi32>,
+                                %arg2: memref<f32>, %arg3: memref<i32>,
+                                %arg4: memref<1xf32>, %arg5: memref<1xi32>) {
+    "lmhlo.reduce"(%arg0, %arg1, %arg2, %arg3, %arg4, %arg5) ( {
+    ^bb0(%arg6: memref<f32>, %arg7: memref<i32>, %arg8: memref<f32>,
+         %arg9: memref<i32>, %arg10: memref<f32>, %arg11: memref<i32>):
+      "lmhlo.add"(%arg6, %arg8, %arg10) : (memref<f32>, memref<f32>, memref<f32>) -> ()
+      "lmhlo.add"(%arg7, %arg9, %arg11) : (memref<i32>, memref<i32>, memref<i32>) -> ()
+      "lmhlo.terminator"() : () -> ()
+    }) {dimensions = dense<1> : tensor<1xi64>} 
+       : (memref<1x8xf32>, memref<1x8xi32>, memref<f32>, memref<i32>, memref<1xf32>, memref<1xi32>) -> ()
+    return
+  }
+}
+// CHECK: %[[INIT_VAL0:.*]] = memref.load %arg2[] : memref<f32>
+// CHECK: linalg.fill(%[[INIT_VAL0]], %arg4) : f32, memref<1xf32> 
+// CHECK: %[[INIT_VAL1:.*]] = memref.load %arg3[] : memref<i32>
+// CHECK: linalg.fill(%[[INIT_VAL1]], %arg5) : i32, memref<1xi32> 
+// CHECK: linalg.generic {
+// CHECK-SAME: indexing_maps = [#[[REDUCE_INPUT_MAP]], #[[REDUCE_INPUT_MAP]], #[[REDUCE_OUTPUT_MAP]], #[[REDUCE_OUTPUT_MAP]]],
+// CHECK-SAME: iterator_types = ["parallel", "reduction"]}
+// CHECK-SAME: ins(%arg0, %arg1 : memref<1x8xf32>, memref<1x8xi32>) outs(%arg4, %arg5 : memref<1xf32>, memref<1xi32>) {
+// CHECK: %2 = memref.alloca() : memref<f32>
+// CHECK: %3 = memref.alloca() : memref<i32>
+// CHECK: %4 = memref.alloca() : memref<f32>
+// CHECK: %5 = memref.alloca() : memref<i32>
+// CHECK: %6 = memref.alloca() : memref<f32>
+// CHECK: %7 = memref.alloca() : memref<i32>
+// CHECK: memref.store %arg6, %2[] : memref<f32>
+// CHECK: memref.store %arg7, %3[] : memref<i32>
+// CHECK: memref.store %arg8, %4[] : memref<f32>
+// CHECK: memref.store %arg9, %5[] : memref<i32>
+// CHECK: %8 = memref.load %2[] : memref<f32>
+// CHECK: %9 = memref.load %4[] : memref<f32>
+// CHECK: %10 = addf %8, %9 : f32
+// CHECK: memref.store %10, %6[] : memref<f32>
+// CHECK: %11 = memref.load %3[] : memref<i32>
+// CHECK: %12 = memref.load %5[] : memref<i32>
+// CHECK: %13 = addi %11, %12 : i32
+// CHECK: memref.store %13, %7[] : memref<i32>
+// CHECK: %14 = memref.load %6[] : memref<f32>
+// CHECK: %15 = memref.load %7[] : memref<i32>
+// CHECK: linalg.yield %14, %15 : f32, i32
